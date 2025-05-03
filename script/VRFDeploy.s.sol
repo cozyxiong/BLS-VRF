@@ -19,7 +19,7 @@ contract VRFDeployScript is Script {
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address deployerAddress = vm.addr(deployerAddress);
+        address deployerAddress = vm.addr(deployerPrivateKey);
         vm.startBroadcast();
 
         emptyContract = new EmptyContract();
@@ -40,7 +40,7 @@ contract VRFDeployScript is Script {
 
         VRFManager vrfImplementation = new VRFManager();
         VRFFactory vrfFactory = new VRFFactory();
-        address proxyVrf = vrfFactory.createProxy(address(vrfImplementation));
+        address proxyVrf = vrfFactory.createProxy(address(vrfImplementation), msg.sender, address(blsApkRegistry));
 
         console.log("bls proxy contract deployed at:", address(blsApkRegistry));
         console.log("vrf logic contract deployed at:", address(vrfImplementation));

@@ -45,8 +45,8 @@ contract VRFManager is Initializable, OwnableUpgradeable, VRFStorage, IVRFManage
         emit RequestSent(_requestId, _numWords, address(this));
     }
 
-    function fulfillRandomWords(uint256 _requestId, uint256[] memory _randomWords, uint256 blockNumber, IBLSApkRegistry.SignatureCheckParams calldata params, bytes32 memory msgHash) external onlyWhiteList {
-        IBLSApkRegistry.checkSignatures(blockNumber, params, msgHash);
+    function fulfillRandomWords(uint256 _requestId, uint256[] memory _randomWords, uint256 blockNumber, IBLSApkRegistry.SignatureCheckParams calldata params, bytes32 msgHash) external onlyWhiteList {
+        blsRegistry.checkSignature(blockNumber, params, msgHash);
 
         requestMapping[_requestId] = RequestStatus({
             isFulfilled: true,

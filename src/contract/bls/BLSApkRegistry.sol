@@ -57,10 +57,14 @@ contract BLSApkRegistry is Initializable, OwnableUpgradeable, EIP712, BLSApkStor
         whitelist[operator] = isAdd;
     }
 
-    function registerPubKey(address operator, PubKeyRegistrationParams calldata params, bytes32 memory msgHash) external returns (bytes32) {
+    function getPubKeyRegMessageHash(address operator) public view returns (BN254.G1Point memory) {
+        return BN254.hashToG1(_hashTypedDataV4(keccak256(abi.encode(PUBKEY_REGISTRATION_TYPEHASH, operator))));
+    }
+
+    function registerPubKey(address operator, PubKeyRegistrationParams calldata params, BN254.G1Point memory msgHash) external returns (bytes32) {
         require(whitelist[msg.sender], "BLSApkRegistry.registerPubKey: this address not authorized to register public key");
 
-        byte32 pubKeyG1Hash = BN254.hashG1Point(params.pubKeyG1);
+        bytes32 pubKeyG1Hash = BN254.hashG1Point(params.pubKeyG1);
         require(pubKeyG1Hash != ZERO_PK_HASH, "BLSApkRegistry.registerPubKey: this public key hash is zero");
         require(operatorToPubKeyHash[operator] == bytes32(0), "BLSApkRegistry.registerPubKey: this operator already register public key");
         require(pubKeyHashToOperator[pubKeyG1Hash] == address(0), "BLSApkRegistry.registerPubKey: this public key hash already registered");
@@ -68,7 +72,8 @@ contract BLSApkRegistry is Initializable, OwnableUpgradeable, EIP712, BLSApkStor
         uint256 gamma = uint256(
             keccak256(
                 abi.encodePacked(
-                    msgHash,
+                    msgHash.X,
+                    msgHash.Y,
                     params.pubKeyG1.X,
                     params.pubKeyG1.Y,
                     params.pubKeyG2.X,
@@ -83,7 +88,7 @@ contract BLSApkRegistry is Initializable, OwnableUpgradeable, EIP712, BLSApkStor
             BN254.pairing(
                 params.sigma.plus(params.pubKeyG1.scalar_mul(gamma)),
                 BN254.negGeneratorG2(),
-                BN254.hashToG1(msgHash).plus(BN254.generatorG1().scalar_mul(gamma)),
+                msgHash.plus(BN254.generatorG1().scalar_mul(gamma)),
                 params.pubKeyG2
             ),
             "BLSApkRegistry.registerPubKey: signature is wrong or G1 and G2 public key not match"
@@ -97,7 +102,7 @@ contract BLSApkRegistry is Initializable, OwnableUpgradeable, EIP712, BLSApkStor
         return pubKeyG1Hash;
     }
 
-    function getRegisteredPubKey(address operator) external view returns (BN254.G1Point memory, bytes32) {
+    function getRegisteredPubKey(address operator) public view returns (BN254.G1Point memory, bytes32) {
         BN254.G1Point memory pubKeyG1 = operatorToPubKey[operator];
         bytes32 pubKeyG1Hash = operatorToPubKeyHash[operator];
         require(pubKeyG1Hash != bytes32(0), "BLSApkRegistry.getRegisteredPubKey: operator is not registered");
@@ -137,7 +142,7 @@ contract BLSApkRegistry is Initializable, OwnableUpgradeable, EIP712, BLSApkStor
         }
     }
 
-    function checkSignature(uint256 blockNumber, SignatureCheckParams calldata params, bytes32 memory msgHash) external returns (StakeTotals memory, bytes32) {
+    function checkSignature(uint256 blockNumber, SignatureCheckParams calldata params, bytes32 msgHash) public view returns (StakeTotals memory, bytes32) {
         require(blockNumber < uint32(block.number), "BLSApkRegistry.checkSignature: invalid block number");
 
         uint256 nonSignerPubKeyLength = params.nonSignerPubKeysG1.length;
@@ -153,36 +158,35 @@ contract BLSApkRegistry is Initializable, OwnableUpgradeable, EIP712, BLSApkStor
             signerApkG1 = apkG1;
         }
 
+        (bool paringSuccess, bool signatureIsValid) = _blsCheck(msgHash, apkG1, params.apkG2, params.sigma);
+        require(paringSuccess, "BLSSignatureChecker.checkSignatures: paring failed");
+        require(signatureIsValid, "BLSSignatureChecker.checkSignatures: signature is invalid");
+
+        bytes32 nonSignerRecordHash = keccak256(abi.encodePacked(blockNumber, nonSignerPubKeyHash));
+        StakeTotals memory stakeRecord = StakeTotals({totalEthStake: params.totalEthStake, totalTokenStake: params.totalTokenStake});
+        return (stakeRecord, nonSignerRecordHash);
+    }
+
+    function _blsCheck(bytes32 msgHash, BN254.G1Point memory apkG1, BN254.G2Point memory apkG2, BN254.G1Point memory sigma) internal view returns (bool paringSuccess, bool signatureIsValid) {
         uint256 gamma = uint256(
             keccak256(
                 abi.encodePacked(
                     msgHash,
-                    apkG1.X,
-                    apkG1.Y,
-                    params.apkG2.X[0],
-                    params.apkG2.X[1],
-                    params.apkG2.Y[0],
-                    params.apkG2.Y[1],
-                    params.sigma.X,
-                    params.sigma.Y
+                    apkG1.X, apkG1.Y,
+                    apkG2.X[0], apkG2.X[1],
+                    apkG2.Y[0], apkG2.Y[1],
+                    sigma.X, sigma.Y
                 )
             )
         ) % BN254.FR_MODULUS;
 
-        require(
-            BN254.safePairing(
-                params.sigma.plus(apkG1.scalar_mul(gamma)),
-                BN254.negGeneratorG2(),
-                BN254.hashToG1(msgHash).plus(BN254.generatorG1().scalar_mul(gamma)),
-                params.apkG2,
-                PAIRING_EQUALITY_CHECK_GAS
-            ),
-            "BLSSignatureChecker.checkSignatures: signature is invalid or apkG1 and apkG2 not matched"
+        (paringSuccess, signatureIsValid) = BN254.safePairing(
+            sigma.plus(apkG1.scalar_mul(gamma)),
+            BN254.negGeneratorG2(),
+            BN254.hashToG1(msgHash).plus(BN254.generatorG1().scalar_mul(gamma)),
+            apkG2,
+            PAIRING_EQUALITY_CHECK_GAS
         );
-
-        bytes32 nonSignerRecordHash = keccak256(abi.encodePacked(blockNumber, nonSignerPubKeyHash));
-        StakeTotals memory stakeRecord = StakeTotals({totalEthStake: params.totalEthStake, totalTokenStake: params.totalTokenStake});
-        return (nonSignerRecordHash, stakeRecord);
     }
 
     function _initializeApk() internal {
