@@ -1,4 +1,6 @@
-# BLS-VRF: Verifiable Random Function with BLS Signatures
+# BLS-VRF
+**BLS-VRF: Verifiable Random Function with BLS Signatures**
+
 BLS-VRF is an implementation of Verifiable Random Function (VRF) using Boneh-Lynn-Shacham (BLS) signatures on the Ethereum blockchain. This project provides a secure and efficient way to generate on-chain verifiable randomness, crucial for applications.
 
 ## Build
